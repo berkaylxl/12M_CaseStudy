@@ -1,0 +1,86 @@
+CREATE PROCEDURE  usp_GetDataList (@MalKodu VARCHAR(30),@Baslangic_Tarihi INT,@Bitis_Tarihi INT)
+AS BEGIN
+
+   --Cursor  için değişkenler
+    DECLARE @SiraNo INT;
+    DECLARE @IslemTur VARCHAR(5);
+    DECLARE @EvrakNo VARCHAR(16);
+    DECLARE @Tarih VARCHAR(15);
+    DECLARE @GirisMiktar INT;
+    DECLARE @CikisMiktar INT;
+    DECLARE @Stok INT;
+
+	--Stok güncellmesi yapacağımız geçici tablo oluşturma
+	CREATE TABLE #TempTable (
+        SiraNo INT,
+        IslemTur VARCHAR(5),
+        EvrakNo VARCHAR(30),
+        Tarih VARCHAR(15),
+        GirisMiktar INT,
+        CikisMiktar INT,
+        Stok INT  
+    );
+--Geçici tabloya veri ekleme
+INSERT INTO #TempTable (SiraNo, IslemTur, EvrakNo, Tarih, GirisMiktar, CikisMiktar, Stok)	
+SELECT 
+       ROW_NUMBER() OVER (ORDER BY CONVERT(DATETIME, Tarih, 104)) AS SiraNo, --Tarihe göre satır numarası oluşturma
+	   CASE WHEN STI.IslemTur = 0 THEN 'Giriş' WHEN STI.IslemTur = 1 THEN  'Çıkış' END AS  IslemTur,
+	   STI.EvrakNo AS EvrakNo,
+	   CONVERT(VARCHAR(15), CAST(STI.Tarih - 2 AS datetime),104) AS Tarih,
+	   CASE WHEN STI.IslemTur = 0 Then STI.Miktar WHEN STI.IslemTur =1 THEN 0 END AS  GirisMiktar,
+	   CASE WHEN STI.IslemTur = 1 Then STI.Miktar WHEN STI.IslemTur =0 THEN 0 END AS  CikisMiktar,
+       0 AS Stok
+
+from STI
+JOIN STK
+ON STI.MalKodu = STK.MalKodu
+WHERE STK.MalKodu= @MalKodu
+ORDER BY STI.Tarih;
+
+DECLARE stok_cursor CURSOR FOR  --Cursor tanımlanır ve çalışacağı sorgu belirlenir.
+Select * From #TempTable;
+
+DECLARE @TempStok INT; --Bir önceki satırın stok bilgisinin tutulması için
+SET @TempStok = 0;
+
+OPEN stok_cursor; --Cursor çalıştırılır.
+
+--satırı alır ve değişkenlere atar.
+FETCH NEXT FROM stok_cursor INTO @SiraNo, @IslemTur, @EvrakNo, @Tarih, @GirisMiktar, @CikisMiktar, @Stok;
+
+WHILE @@FETCH_STATUS = 0  --Hata olmadığı sürece bir sonraki kayıt elde edilir.
+	BEGIN
+	    IF @IslemTur ='Giriş'                        --İşlem giriş ise bir önceki stok üzerine eklenir değilse stoktan düşürülür.
+		    SET @Stok = @TempStok + @GirisMiktar;
+		ELSE
+		    SET @Stok = @TempStok - @CikisMiktar;
+
+		SET @TempStok = @Stok;
+
+		UPDATE #TempTable        --Stok bilgisi geçici tablo üzerinden güncellenir.
+		SET Stok = @TempStok
+		WHERE SiraNo = @SiraNo;
+
+		FETCH NEXT FROM stok_cursor INTO @SiraNo, @IslemTur, @EvrakNo, @Tarih, @GirisMiktar, @CikisMiktar,@Stok; --Bir sonraki satıra geçilir.
+	END;
+
+SELECT  --Geçici tabloki değerler parametreden gelen tarih aralığı ile filtrelenmiş şekilde döndürülür.
+    ROW_NUMBER() OVER (ORDER BY CONVERT(DATETIME, Tarih, 104)) AS SiraNo,
+	IslemTur,
+	EvrakNo,
+	Tarih,
+	GirisMiktar,
+	CikisMiktar,
+	Stok
+FROM #TempTable
+WHERE  
+     CONVERT(DATETIME, Tarih, 104) 
+	 BETWEEN CONVERT(DATETIME,CAST(@Baslangic_Tarihi- 2 AS datetime),104)
+	 AND CONVERT(DATETIME, CAST(@Bitis_Tarihi- 2  AS datetime),104)
+
+CLOSE stok_cursor;  --cursor kapatılır.
+DEALLOCATE stok_cursor; -- cursor tanımı ve kaynakalrı temizlenir.
+
+DROP TABLE #TempTable; --Geçici tablo silinir.
+END
+
