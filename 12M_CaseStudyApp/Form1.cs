@@ -4,6 +4,7 @@ using System;
 using System.Data;
 using System.Data.SqlClient;
 using System.Windows.Forms;
+using System.Configuration;
 
 namespace _12M_CaseStudyApp
 {
@@ -13,7 +14,7 @@ namespace _12M_CaseStudyApp
         {
             InitializeComponent();
         }
-        string connectionString = "Data Source=LAPTOP-BEKO;Initial Catalog=TEST;Integrated Security=True";
+        string connectionString = ConfigurationManager.ConnectionStrings["TestDBConnectionString"].ConnectionString;
         string currentKod = "";
         int baslangic_Tarihi = 0;
         int bitis_Tarihi= 0;
